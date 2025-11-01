@@ -1,9 +1,11 @@
+import 'package:app_integrador/ui/screens/editar_chamado_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../data/providers/chamado_provider.dart';
+import '../../data/providers/auth_provider.dart';
 import '../widgets/chamado_card.dart';
-import 'chamado_detail_screen.dart';
 import 'criar_chamado_screen.dart';
+import 'gestao_ativos_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -31,6 +33,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           SnackBar(
             content: Text('Erro ao carregar chamados: $e'),
             backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -38,7 +41,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _navigateToDetail(String chamadoId) {
-    // Verifica se o chamado existe antes de navegar
     final provider = Provider.of<ChamadoProvider>(context, listen: false);
     final chamado = provider.getChamadoById(chamadoId);
     
@@ -47,6 +49,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         const SnackBar(
           content: Text('Chamado não encontrado'),
           backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
@@ -61,47 +64,94 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _navigateToCriarChamado() {
-    Navigator.of(context).push(
+  Future<void> _navigateToCriarChamado() async {
+    final result = await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => const CriarChamadoScreen(),
       ),
     );
+
+    // Se o chamado foi criado com sucesso, recarrega a lista
+    if (result == true && mounted) {
+      _loadChamados();
+    }
+  }
+
+  Future<void> _handleLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sair'),
+        content: const Text('Deseja realmente sair do aplicativo?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text(
+              'Sair',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      await authProvider.logout();
+      
+      if (mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: const Text('Dashboard'),
+        elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.search),
             onPressed: () {
+              // TODO: Implementar busca
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Busca em desenvolvimento')),
+                const SnackBar(
+                  content: Text('Busca em desenvolvimento'),
+                  behavior: SnackBarBehavior.floating,
+                ),
               );
             },
           ),
           IconButton(
-            icon: const Icon(Icons.notifications_outlined),
+            icon: const Icon(Icons.qr_code_scanner),
+            tooltip: 'Gestão de Ativos',
             onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Notificações em desenvolvimento')),
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const GestaoAtivosScreen(),
+                ),
               );
             },
           ),
           const SizedBox(width: 8),
           PopupMenuButton<String>(
-            child: const Padding(
-              padding: EdgeInsets.all(8.0),
+            child: Padding(
+              padding: const EdgeInsets.all(8.0),
               child: CircleAvatar(
                 radius: 16,
-                backgroundColor: Color(0xFF2563EB),
+                backgroundColor: const Color(0xFF2563EB),
                 child: Text(
-                  'MS',
-                  style: TextStyle(
+                  authProvider.getInitials(),
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -112,20 +162,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onSelected: (value) {
               if (value == 'perfil') {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Perfil em desenvolvimento')),
+                  const SnackBar(
+                    content: Text('Perfil em desenvolvimento'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
                 );
               } else if (value == 'sair') {
-                Navigator.of(context).pushReplacementNamed('/login');
+                _handleLogout();
               }
             },
             itemBuilder: (BuildContext context) => [
-              const PopupMenuItem<String>(
+              PopupMenuItem<String>(
                 value: 'perfil',
                 child: Row(
                   children: [
-                    Icon(Icons.person_outline),
-                    SizedBox(width: 8),
-                    Text('Meu Perfil'),
+                    const Icon(Icons.person_outline),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          authProvider.userName ?? 'Usuário',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        if (authProvider.userEmail != null)
+                          Text(
+                            authProvider.userEmail!,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -135,7 +204,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Row(
                   children: [
                     Icon(Icons.logout, color: Colors.red),
-                    SizedBox(width: 8),
+                    SizedBox(width: 12),
                     Text('Sair', style: TextStyle(color: Colors.red)),
                   ],
                 ),

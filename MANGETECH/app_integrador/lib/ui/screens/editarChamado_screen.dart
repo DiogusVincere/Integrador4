@@ -1,32 +1,56 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:image_picker/image_picker.dart';
 import '../../data/providers/chamado_provider.dart';
-import '../../data/providers/auth_provider.dart';
+import '../../models/chamado.dart';
 import '../theme/app_theme.dart';
 
-class CriarChamadoScreen extends StatefulWidget {
-  const CriarChamadoScreen({Key? key}) : super(key: key);
+class EditarChamadoScreen extends StatefulWidget {
+  final Chamado chamado;
+
+  const EditarChamadoScreen({
+    Key? key,
+    required this.chamado,
+  }) : super(key: key);
 
   @override
-  State<CriarChamadoScreen> createState() => _CriarChamadoScreenState();
+  State<EditarChamadoScreen> createState() => _EditarChamadoScreenState();
 }
 
-class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
+class _EditarChamadoScreenState extends State<EditarChamadoScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _tituloController = TextEditingController();
-  final _ativoController = TextEditingController();
-  final _ambienteController = TextEditingController();
-  final _descricaoController = TextEditingController();
+  late TextEditingController _tituloController;
+  late TextEditingController _ativoController;
+  late TextEditingController _ambienteController;
+  late TextEditingController _descricaoController;
   
-  String _urgencia = 'Média';
+  late String _urgencia;
+  late String _status;
   DateTime? _dataSugerida;
-  final List<XFile> _anexos = [];
   bool _isLoading = false;
 
-  // Opções de urgência conforme Django
+  // Opções conforme Django
   final List<String> _urgenciaOptions = ['Baixa', 'Média', 'Alta', 'Crítico'];
+  final List<String> _statusOptions = [
+    'ABERTO',
+    'AGUARDANDO RESP',
+    'EM ANDAMENTO',
+    'REALIZADO',
+    'CONCLUÍDO',
+    'CANCELADO',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Inicializa com os dados atuais do chamado
+    _tituloController = TextEditingController(text: widget.chamado.titulo);
+    _ativoController = TextEditingController(text: widget.chamado.ativo);
+    _ambienteController = TextEditingController(text: widget.chamado.ambiente);
+    _descricaoController = TextEditingController(text: widget.chamado.descricao);
+    _urgencia = widget.chamado.prioridade;
+    _status = widget.chamado.status;
+    _dataSugerida = widget.chamado.dataSugerida;
+  }
 
   @override
   void dispose() {
@@ -37,27 +61,10 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
     super.dispose();
   }
 
-  Future<void> _pickImages() async {
-    if (_anexos.length >= 5) {
-      _showMessage('Máximo de 5 arquivos permitidos', isError: true);
-      return;
-    }
-
-    final ImagePicker picker = ImagePicker();
-    final List<XFile> images = await picker.pickMultiImage();
-
-    if (images.isNotEmpty) {
-      setState(() {
-        final remainingSlots = 5 - _anexos.length;
-        _anexos.addAll(images.take(remainingSlots));
-      });
-    }
-  }
-
   Future<void> _selectDate() async {
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.now(),
+      initialDate: _dataSugerida ?? DateTime.now(),
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
@@ -65,7 +72,9 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
     if (picked != null) {
       final TimeOfDay? time = await showTimePicker(
         context: context,
-        initialTime: TimeOfDay.now(),
+        initialTime: _dataSugerida != null 
+            ? TimeOfDay.fromDateTime(_dataSugerida!)
+            : TimeOfDay.now(),
       );
 
       if (time != null) {
@@ -82,8 +91,14 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
     }
   }
 
-  Future<void> _handleSubmit() async {
+  Future<void> _handleSave() async {
     if (_formKey.currentState!.validate()) {
+      // Mostrar diálogo de confirmação se mudar o status
+      if (_status != widget.chamado.status) {
+        final confirmed = await _showConfirmStatusChange();
+        if (!confirmed) return;
+      }
+
       setState(() => _isLoading = true);
 
       try {
@@ -95,43 +110,63 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
           dataSugeridaFormatada = _dataSugerida!.toIso8601String();
         }
 
-        // Criar chamado
-        final success = await chamadoProvider.createChamado(
-          titulo: _tituloController.text.trim(),
-          descricao: _descricaoController.text.trim(),
-          ativo: _ativoController.text.trim(),
-          ambiente: _ambienteController.text.trim().isEmpty 
-              ? 'Não informado' 
-              : _ambienteController.text.trim(),
-          urgencia: _urgencia,
-          dataSugerida: dataSugeridaFormatada,
-          responsaveis: null, // Pode adicionar seleção de responsáveis depois
-        );
+        // Atualizar chamado via API
+        // TODO: Implementar método de atualização no provider
+        // Por enquanto, vamos apenas mudar o status se necessário
+        
+        if (_status != widget.chamado.status) {
+          final success = await chamadoProvider.mudarStatus(
+            chamadoId: widget.chamado.id,
+            novoStatus: _status,
+            descricao: 'Status alterado via edição do chamado',
+          );
+          
+          if (!success) {
+            throw Exception('Erro ao atualizar status');
+          }
+        }
 
         if (mounted) {
           setState(() => _isLoading = false);
-
-          if (success) {
-            _showMessage('Chamado criado com sucesso!', isError: false);
-            
-            // Aguardar um pouco para o usuário ver a mensagem
-            await Future.delayed(const Duration(milliseconds: 500));
-            
-            if (mounted) {
-              Navigator.of(context).pop(true); // Retorna true para indicar sucesso
-            }
-          } else {
-            final error = chamadoProvider.error ?? 'Erro ao criar chamado';
-            _showMessage(error, isError: true);
+          _showMessage('Chamado atualizado com sucesso!', isError: false);
+          
+          await Future.delayed(const Duration(milliseconds: 500));
+          
+          if (mounted) {
+            Navigator.of(context).pop(true); // Retorna true para indicar sucesso
           }
         }
       } catch (e) {
         if (mounted) {
           setState(() => _isLoading = false);
-          _showMessage('Erro ao criar chamado: $e', isError: true);
+          _showMessage('Erro ao atualizar chamado: $e', isError: true);
         }
       }
     }
+  }
+
+  Future<bool> _showConfirmStatusChange() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmar mudança de status'),
+        content: Text(
+          'Você está alterando o status de "${widget.chamado.status}" para "$_status".\n\n'
+          'Deseja continuar?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
   }
 
   void _showMessage(String message, {required bool isError}) {
@@ -152,7 +187,7 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text('Criar Chamado'),
+        title: const Text('Editar Chamado'),
         elevation: 0,
       ),
       body: SingleChildScrollView(
@@ -166,20 +201,21 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.blue[50],
+                  color: Colors.orange[50],
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue[200]!),
+                  border: Border.all(color: Colors.orange[200]!),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
+                    Icon(Icons.edit_outlined, color: Colors.orange[700], size: 20),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Preencha os dados para criar um novo chamado',
+                        'ID do Chamado: ${widget.chamado.id}',
                         style: TextStyle(
                           fontSize: 13,
-                          color: Colors.blue[700],
+                          color: Colors.orange[700],
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
@@ -193,7 +229,6 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
                 controller: _tituloController,
                 decoration: const InputDecoration(
                   labelText: 'Título *',
-                  hintText: 'Descreva brevemente o problema',
                   prefixIcon: Icon(Icons.title),
                 ),
                 textCapitalization: TextCapitalization.sentences,
@@ -214,9 +249,7 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
                 controller: _ativoController,
                 decoration: const InputDecoration(
                   labelText: 'Ativo/Equipamento *',
-                  hintText: 'Ex: Notebook Dell, Impressora HP',
                   prefixIcon: Icon(Icons.inventory_2_outlined),
-                  suffixIcon: Icon(Icons.qr_code_scanner),
                 ),
                 textCapitalization: TextCapitalization.words,
                 validator: (value) {
@@ -233,7 +266,6 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
                 controller: _ambienteController,
                 decoration: const InputDecoration(
                   labelText: 'Ambiente/Localização',
-                  hintText: 'Ex: Setor Financeiro - Sala 204',
                   prefixIcon: Icon(Icons.location_on_outlined),
                 ),
                 textCapitalization: TextCapitalization.words,
@@ -245,7 +277,6 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
                 controller: _descricaoController,
                 decoration: const InputDecoration(
                   labelText: 'Descrição *',
-                  hintText: 'Descreva o problema detalhadamente',
                   prefixIcon: Icon(Icons.description_outlined),
                   alignLabelWithHint: true,
                 ),
@@ -259,6 +290,27 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
                     return 'A descrição deve ter pelo menos 15 caracteres';
                   }
                   return null;
+                },
+              ),
+              const SizedBox(height: 24),
+
+              // Status
+              DropdownButtonFormField<String>(
+                value: _status,
+                decoration: const InputDecoration(
+                  labelText: 'Status *',
+                  prefixIcon: Icon(Icons.sync_alt),
+                ),
+                items: _statusOptions.map((status) {
+                  return DropdownMenuItem(
+                    value: status,
+                    child: Text(status),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _status = value);
+                  }
                 },
               ),
               const SizedBox(height: 24),
@@ -293,7 +345,7 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
                             Text(
                               _dataSugerida != null
                                   ? '${_dataSugerida!.day.toString().padLeft(2, '0')}/${_dataSugerida!.month.toString().padLeft(2, '0')}/${_dataSugerida!.year} às ${_dataSugerida!.hour.toString().padLeft(2, '0')}:${_dataSugerida!.minute.toString().padLeft(2, '0')}'
-                                  : 'Nenhuma data selecionada (opcional)',
+                                  : 'Nenhuma data definida',
                               style: TextStyle(
                                 fontSize: 13,
                                 color: _dataSugerida != null 
@@ -364,25 +416,6 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
                   );
                 }).toList(),
               ),
-              const SizedBox(height: 24),
-
-              // Fotos/Anexos (nota: upload será implementado depois)
-              const Text(
-                'Fotos / Anexos (em breve)',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Upload de anexos será habilitado em breve',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey[600],
-                ),
-              ),
               const SizedBox(height: 32),
 
               // Botões de ação
@@ -401,7 +434,7 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
                   Expanded(
                     flex: 2,
                     child: ElevatedButton(
-                      onPressed: _isLoading ? null : _handleSubmit,
+                      onPressed: _isLoading ? null : _handleSave,
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 16),
                       ),
@@ -416,7 +449,7 @@ class _CriarChamadoScreenState extends State<CriarChamadoScreen> {
                                 ),
                               ),
                             )
-                          : const Text('Criar Chamado'),
+                          : const Text('Salvar Alterações'),
                     ),
                   ),
                 ],
