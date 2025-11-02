@@ -7,6 +7,7 @@ import '../widgets/chamado_card.dart';
 import 'criar_chamado_screen.dart';
 import 'gestao_ativos_screen.dart';
 
+
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
 
@@ -18,7 +19,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    // Carrega os chamados após o primeiro frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadChamados();
     });
@@ -71,7 +71,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
 
-    // Se o chamado foi criado com sucesso, recarrega a lista
     if (result == true && mounted) {
       _loadChamados();
     }
@@ -122,7 +121,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           IconButton(
             icon: const Icon(Icons.search),
             onPressed: () {
-              // TODO: Implementar busca
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text('Busca em desenvolvimento'),
@@ -161,12 +159,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             onSelected: (value) {
               if (value == 'perfil') {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Perfil em desenvolvimento'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
+                // ✅ NOVO: Navega para tela de perfil
+                Navigator.of(context).pushNamed('/perfil');
               } else if (value == 'sair') {
                 _handleLogout();
               }

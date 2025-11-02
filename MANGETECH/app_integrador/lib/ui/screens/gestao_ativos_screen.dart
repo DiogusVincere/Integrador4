@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import '../../data/providers/ativo_provider.dart';
+import '../../models/ativo.dart';
+import '../theme/app_theme.dart';
+import 'adicionar_ativo_screen.dart';
 
 class GestaoAtivosScreen extends StatefulWidget {
   const GestaoAtivosScreen({Key? key}) : super(key: key);
@@ -11,41 +16,64 @@ class GestaoAtivosScreen extends StatefulWidget {
 
 class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
   final _searchController = TextEditingController();
-  String? _selectedEnvironment;
   String? _selectedStatus;
-  String? _selectedManufacturer;
+  String _searchQuery = '';
 
-  final List<Asset> _assets = [
-    Asset(
-      id: 'AST-001',
-      name: 'Servidor Dell R740',
-      model: 'Dell PowerEdge',
-      environment: 'Produção',
-      status: 'Ativo',
-      lastTicket: 'CHM-2023-045',
-    ),
-    Asset(
-      id: 'AST-002',
-      name: 'Switch Cisco 2960X',
-      model: 'Cisco Catalyst',
-      environment: 'Testes',
-      status: 'Manutenção',
-      lastTicket: 'CHM-2023-112',
-    ),
-    Asset(
-      id: 'AST-003',
-      name: 'Notebook Lenovo T490',
-      model: 'Lenovo ThinkPad',
-      environment: 'Desenvolvimento',
-      status: 'Inativo',
-      lastTicket: null,
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadAtivos();
+    });
+  }
 
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadAtivos() async {
+    final provider = Provider.of<AtivoProvider>(context, listen: false);
+    await provider.fetchAtivos();
+  }
+
+  void _onSearchChanged(String query) {
+    setState(() => _searchQuery = query);
+  }
+
+  List<Ativo> _getFilteredAtivos(List<Ativo> ativos) {
+    var filtered = ativos;
+
+    // Filtro por status
+    if (_selectedStatus != null && _selectedStatus!.isNotEmpty) {
+      filtered = filtered.where((a) => a.status == _selectedStatus).toList();
+    }
+
+    // Filtro por busca
+    if (_searchQuery.isNotEmpty) {
+      final query = _searchQuery.toLowerCase();
+      filtered = filtered.where((a) {
+        return a.nome.toLowerCase().contains(query) ||
+               a.codigo.toLowerCase().contains(query) ||
+               a.modelo.toLowerCase().contains(query) ||
+               (a.fabricante?.toLowerCase().contains(query) ?? false);
+      }).toList();
+    }
+
+    return filtered;
+  }
+
+  Future<void> _navigateToAdicionarAtivo() async {
+    final result = await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const AdicionarAtivoScreen(),
+      ),
+    );
+
+    if (result == true && mounted) {
+      _loadAtivos();
+    }
   }
 
   @override
@@ -54,33 +82,32 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: const Text('Gestão de Ativos'),
+        elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.qr_code_scanner),
-            onPressed: () => _showQRScanner(),
+            tooltip: 'Escanear QR Code',
+            onPressed: _showQRScanner,
           ),
           IconButton(
-            icon: const Icon(Icons.person_outline),
-            onPressed: () {},
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Atualizar',
+            onPressed: _loadAtivos,
           ),
+          const SizedBox(width: 8),
         ],
       ),
       body: Column(
         children: [
-          // Filters
           _buildFilters(),
-
-          // Asset List
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _assets.length,
-              itemBuilder: (context, index) {
-                return _buildAssetCard(_assets[index]);
-              },
-            ),
-          ),
+          _buildStats(),
+          Expanded(child: _buildAssetList()),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _navigateToAdicionarAtivo,
+        icon: const Icon(Icons.add),
+        label: const Text('Adicionar Ativo'),
       ),
     );
   }
@@ -95,74 +122,237 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
           TextField(
             controller: _searchController,
             decoration: InputDecoration(
-              hintText: 'Buscar ativos...',
+              hintText: 'Buscar por código, nome ou modelo...',
               prefixIcon: const Icon(Icons.search),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchController.clear();
+                        _onSearchChanged('');
+                      },
+                    )
+                  : null,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
               ),
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             ),
+            onChanged: _onSearchChanged,
           ),
           const SizedBox(height: 12),
 
-          // Dropdowns
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _selectedEnvironment,
-                  decoration: InputDecoration(
-                    labelText: 'Ambiente',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: null, child: Text('Todos')),
-                    DropdownMenuItem(value: 'production', child: Text('Produção')),
-                    DropdownMenuItem(value: 'development', child: Text('Desenvolvimento')),
-                    DropdownMenuItem(value: 'testing', child: Text('Testes')),
-                  ],
-                  onChanged: (value) {
-                    setState(() => _selectedEnvironment = value);
-                  },
-                ),
+          // Status Filter
+          DropdownButtonFormField<String>(
+            value: _selectedStatus,
+            decoration: InputDecoration(
+              labelText: 'Filtrar por Status',
+              prefixIcon: const Icon(Icons.filter_list),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _selectedStatus,
-                  decoration: InputDecoration(
-                    labelText: 'Status',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: null, child: Text('Todos')),
-                    DropdownMenuItem(value: 'active', child: Text('Ativo')),
-                    DropdownMenuItem(value: 'inactive', child: Text('Inativo')),
-                    DropdownMenuItem(value: 'maintenance', child: Text('Manutenção')),
-                  ],
-                  onChanged: (value) {
-                    setState(() => _selectedStatus = value);
-                  },
-                ),
-              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            items: const [
+              DropdownMenuItem(value: null, child: Text('Todos os status')),
+              DropdownMenuItem(value: 'Ativo', child: Text('Ativo')),
+              DropdownMenuItem(value: 'Inativo', child: Text('Inativo')),
+              DropdownMenuItem(value: 'Manutenção', child: Text('Manutenção')),
             ],
+            onChanged: (value) {
+              setState(() => _selectedStatus = value);
+            },
           ),
         ],
       ),
     );
   }
 
-  Widget _buildAssetCard(Asset asset) {
+  Widget _buildStats() {
+    return Consumer<AtivoProvider>(
+      builder: (context, provider, child) {
+        if (provider.ativos.isEmpty) return const SizedBox.shrink();
+
+        final stats = provider.getStatusStats();
+        final totalChamados = provider.getTotalChamados();
+        final chamadosAbertos = provider.getChamadosAbertos();
+
+        return Container(
+          color: Colors.white,
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Expanded(
+                child: _buildStatCard(
+                  'Total Ativos',
+                  provider.ativos.length.toString(),
+                  Icons.inventory_2,
+                  Colors.blue,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildStatCard(
+                  'Ativos',
+                  stats['Ativo'].toString(),
+                  Icons.check_circle,
+                  Colors.green,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildStatCard(
+                  'Manutenção',
+                  stats['Manutenção'].toString(),
+                  Icons.build,
+                  Colors.orange,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildStatCard(
+                  'Chamados',
+                  chamadosAbertos.toString(),
+                  Icons.support_agent,
+                  Colors.red,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStatCard(String label, String value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              color: Colors.grey[700],
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAssetList() {
+    return Consumer<AtivoProvider>(
+      builder: (context, provider, child) {
+        if (provider.isLoading) {
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Carregando ativos...'),
+              ],
+            ),
+          );
+        }
+
+        if (provider.error != null) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Erro ao carregar',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    provider.error!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey[600]),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    onPressed: _loadAtivos,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Tentar novamente'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        final filteredAtivos = _getFilteredAtivos(provider.ativos);
+
+        if (filteredAtivos.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.inbox_outlined, size: 64, color: Colors.grey[400]),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Nenhum ativo encontrado',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _searchQuery.isNotEmpty || _selectedStatus != null
+                        ? 'Tente ajustar os filtros de busca'
+                        : 'Nenhum ativo cadastrado',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return RefreshIndicator(
+          onRefresh: _loadAtivos,
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: filteredAtivos.length,
+            itemBuilder: (context, index) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _buildAssetCard(filteredAtivos[index]),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAssetCard(Ativo ativo) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
       child: InkWell(
-        onTap: () => _showAssetDetails(asset),
+        onTap: () => _showAssetDetails(ativo),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -177,7 +367,7 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: QrImageView(
-                  data: asset.id,
+                  data: ativo.codigo,
                   size: 60,
                 ),
               ),
@@ -189,7 +379,7 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      asset.id,
+                      ativo.codigo,
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey[600],
@@ -198,46 +388,43 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      asset.name,
+                      ativo.nome,
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      asset.model,
+                      ativo.modelo,
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.grey[600],
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
+                      runSpacing: 4,
                       children: [
-                        _buildChip(asset.environment, Colors.blue),
-                        _buildStatusChip(asset.status),
-                        if (asset.lastTicket != null)
-                          _buildChip(asset.lastTicket!, Colors.green),
+                        _buildChip(ativo.ambiente, Colors.blue),
+                        _buildStatusChip(ativo.status),
+                        if (ativo.chamadosAbertos > 0)
+                          _buildChip('${ativo.chamadosAbertos} chamado(s)', Colors.orange),
                       ],
                     ),
                   ],
                 ),
               ),
 
-              // Actions
-              Column(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.visibility_outlined),
-                    onPressed: () => _showAssetDetails(asset),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.edit_outlined),
-                    onPressed: () {},
-                  ),
-                ],
+              // Action Button
+              IconButton(
+                icon: const Icon(Icons.chevron_right),
+                onPressed: () => _showAssetDetails(ativo),
               ),
             ],
           ),
@@ -256,7 +443,7 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
       child: Text(
         label,
         style: TextStyle(
-          fontSize: 12,
+          fontSize: 11,
           color: color,
           fontWeight: FontWeight.w600,
         ),
@@ -299,10 +486,7 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
               children: [
                 const Text(
                   'Scanner QR Code',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 IconButton(
                   icon: const Icon(Icons.close),
@@ -325,7 +509,7 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
                       if (barcode.rawValue != null) {
                         cameraController.dispose();
                         Navigator.pop(context);
-                        _showAssetDetailsByQR(barcode.rawValue);
+                        _buscarAtivoPorQR(barcode.rawValue!);
                         break;
                       }
                     }
@@ -342,7 +526,7 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
                   child: TextField(
                     controller: manualInputController,
                     decoration: InputDecoration(
-                      hintText: 'Ex: AST-001',
+                      hintText: 'Ou digite o código',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -355,7 +539,7 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
                     if (manualInputController.text.isNotEmpty) {
                       cameraController.dispose();
                       Navigator.pop(context);
-                      _showAssetDetailsByQR(manualInputController.text);
+                      _buscarAtivoPorQR(manualInputController.text);
                     }
                   },
                   child: const Text('Buscar'),
@@ -371,7 +555,34 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
     });
   }
 
-  void _showAssetDetails(Asset asset) {
+  Future<void> _buscarAtivoPorQR(String codigo) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final provider = Provider.of<AtivoProvider>(context, listen: false);
+    final ativo = await provider.fetchAtivoByQRCode(codigo);
+
+    if (mounted) {
+      Navigator.pop(context); // Fecha loading
+
+      if (ativo != null) {
+        _showAssetDetails(ativo);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Ativo não encontrado: $codigo'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showAssetDetails(Ativo ativo) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -385,10 +596,7 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
               children: [
                 const Text(
                   'Detalhes do Ativo',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
                 IconButton(
                   icon: const Icon(Icons.close),
@@ -406,77 +614,31 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
                   border: Border.all(color: Colors.grey[300]!),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: QrImageView(
-                  data: asset.id,
-                  size: 200,
-                ),
+                child: QrImageView(data: ativo.codigo, size: 200),
               ),
             ),
             const SizedBox(height: 24),
 
-            // Action Buttons
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () {},
-                    icon: const Icon(Icons.smartphone),
-                    label: const Text('Abrir no app'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('ID ${asset.id} copiado!')),
-                    );
-                  },
-                  icon: const Icon(Icons.copy),
-                  label: const Text('Copiar ID'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.grey[100],
-                    foregroundColor: Colors.grey[700],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-
-            // Technical Information
+            // Informações Técnicas
             const Text(
               'Informações Técnicas',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            _buildInfoRow('Nome', asset.name),
-            _buildInfoRow('Tag QR', asset.id),
-            _buildInfoRow('Modelo', asset.model),
-            _buildInfoRow('Serial', 'CN74839283'),
-            _buildInfoRow('Fabricante', 'Dell'),
-            _buildInfoRow('Fornecedor', 'ABC Distribuidora'),
-            _buildInfoRow('Ambiente', asset.environment),
-            _buildInfoRow('Status', asset.status),
+            _buildInfoRow('Código/Tag', ativo.codigo),
+            _buildInfoRow('Nome', ativo.nome),
+            _buildInfoRow('Modelo', ativo.modelo),
+            if (ativo.fabricante != null) _buildInfoRow('Fabricante', ativo.fabricante!),
+            if (ativo.numeroSerie != null) _buildInfoRow('Nº Série', ativo.numeroSerie!),
+            if (ativo.fornecedor != null) _buildInfoRow('Fornecedor', ativo.fornecedor!),
+            _buildInfoRow('Ambiente', ativo.ambiente),
+            _buildInfoRow('Status', ativo.status),
             const SizedBox(height: 24),
 
-            // Related Tickets
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Chamados Relacionados',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {},
-                  child: const Text('Ver Chamados'),
-                ),
-              ],
+            // Chamados Relacionados
+            const Text(
+              'Chamados Relacionados',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
             Container(
@@ -490,30 +652,68 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
                   Row(
                     children: [
                       Expanded(
-                        child: _buildTicketStat('Total de Chamados', '3', Colors.blue),
+                        child: _buildTicketStat(
+                          'Total',
+                          ativo.totalChamados.toString(),
+                          Colors.blue,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: _buildTicketStat('Em Aberto', '1', Colors.orange),
+                        child: _buildTicketStat(
+                          'Em Aberto',
+                          ativo.chamadosAbertos.toString(),
+                          Colors.orange,
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  if (asset.lastTicket != null) ...[
-                    _buildTicketItem(
-                      asset.lastTicket!,
-                      'Problema com rede',
-                      '15/05/2023',
-                      'Resolvido',
-                      Colors.green,
-                    ),
-                    const SizedBox(height: 8),
-                    _buildTicketItem(
-                      'CHM-2023-112',
-                      'Atualização de firmware',
-                      '02/08/2023',
-                      'Em Andamento',
-                      Colors.orange,
+                  if (ativo.ultimoChamado != null) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Último Chamado',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '#${ativo.ultimoChamado!.id} - ${ativo.ultimoChamado!.titulo}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              _buildChip(
+                                ativo.ultimoChamado!.status,
+                                Colors.blue,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                ativo.ultimoChamado!.data,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ],
@@ -521,46 +721,34 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
             ),
             const SizedBox(height: 24),
 
-            // Movement History
-            const Text(
-              'Histórico de Movimentações',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
+            // Histórico
+            if (ativo.historicoMovimentacoes.isNotEmpty) ...[
+              const Text(
+                'Histórico de Movimentações',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                borderRadius: BorderRadius.circular(8),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[50],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  children: ativo.historicoMovimentacoes.map((hist) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _buildHistoryItem(
+                        hist.tipo,
+                        '${hist.descricao}\n${hist.usuarioNome ?? "Sistema"} • ${_formatDate(hist.dataCriacao)}',
+                        Icons.history,
+                        Colors.blue,
+                      ),
+                    );
+                  }).toList(),
+                ),
               ),
-              child: Column(
-                children: [
-                  _buildHistoryItem(
-                    'Ativo cadastrado',
-                    'Por: João Silva • 10/01/2022',
-                    Icons.check_circle,
-                    Colors.blue,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildHistoryItem(
-                    'Movido para Produção',
-                    'Por: Maria Souza • 15/02/2022',
-                    Icons.refresh,
-                    Colors.green,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildHistoryItem(
-                    'Manutenção preventiva',
-                    'Por: Carlos Oliveira • 20/06/2022',
-                    Icons.build,
-                    Colors.purple,
-                  ),
-                ],
-              ),
-            ),
+            ],
           ],
         ),
       ),
@@ -577,19 +765,13 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
             width: 120,
             child: Text(
               label,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[600],
-              ),
+              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-              ),
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
             ),
           ),
         ],
@@ -603,99 +785,20 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[700],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: color,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(
-            value: 0.6,
-            backgroundColor: Colors.grey[200],
-            color: color,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTicketItem(String id, String title, String date, String status, Color statusColor) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                id,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  status,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: statusColor,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
           Text(
-            '$title - $date',
+            value,
             style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[600],
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: color,
             ),
+          ),
+          Text(
+            label,
+            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
           ),
         ],
       ),
@@ -720,18 +823,12 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
             children: [
               Text(
                 title,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 2),
               Text(
                 subtitle,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                ),
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
             ],
           ),
@@ -740,32 +837,7 @@ class _GestaoAtivosScreenState extends State<GestaoAtivosScreen> {
     );
   }
 
-  void _showAssetDetailsByQR(String? qrCode) {
-    if (qrCode == null) return;
-    
-    final asset = _assets.firstWhere(
-      (a) => a.id == qrCode,
-      orElse: () => _assets[0],
-    );
-    
-    _showAssetDetails(asset);
+  String _formatDate(DateTime date) {
+    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
   }
-}
-
-class Asset {
-  final String id;
-  final String name;
-  final String model;
-  final String environment;
-  final String status;
-  final String? lastTicket;
-
-  Asset({
-    required this.id,
-    required this.name,
-    required this.model,
-    required this.environment,
-    required this.status,
-    this.lastTicket,
-  });
 }

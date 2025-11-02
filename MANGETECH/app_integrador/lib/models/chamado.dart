@@ -1,5 +1,5 @@
 class Chamado {
-  final String id;
+  final String id; 
   final String titulo;
   final String descricao;
   final String status;
@@ -39,7 +39,7 @@ class Chamado {
 
   factory Chamado.fromJson(Map<String, dynamic> json) {
     return Chamado(
-      id: json['id']?.toString() ?? '',
+      id: json['id']?.toString() ?? '', 
       titulo: json['titulo'] ?? '',
       descricao: json['descricao'] ?? '',
       status: json['status'] ?? '',

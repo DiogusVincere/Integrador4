@@ -107,6 +107,46 @@ class ChamadoProvider with ChangeNotifier {
     }
   }
 
+  // ✅ NOVO: Atualizar chamado
+  Future<bool> updateChamado({
+    required String chamadoId,
+    String? titulo,
+    String? descricao,
+    String? ativo,
+    String? ambiente,
+    String? urgencia,
+    String? status,
+    String? dataSugerida,
+    List<int>? responsaveis,
+  }) async {
+    try {
+      final chamadoAtualizado = await _apiService.updateChamado(
+        id: chamadoId,
+        titulo: titulo,
+        descricao: descricao,
+        ativo: ativo,
+        ambiente: ambiente,
+        urgencia: urgencia,
+        status: status,
+        dataSugerida: dataSugerida,
+        responsaveis: responsaveis,
+      );
+      
+      // Atualizar na lista local
+      final index = _chamados.indexWhere((c) => c.id == chamadoId);
+      if (index != -1) {
+        _chamados[index] = chamadoAtualizado;
+        notifyListeners();
+      }
+      
+      return true;
+    } catch (e) {
+      _error = 'Erro ao atualizar chamado: ${e.toString()}';
+      notifyListeners();
+      return false;
+    }
+  }
+
   // ========== MUDAR STATUS ==========
   
   Future<bool> mudarStatus({
@@ -121,12 +161,8 @@ class ChamadoProvider with ChangeNotifier {
         descricao: descricao,
       );
       
-      // Atualizar localmente
-      final index = _chamados.indexWhere((c) => c.id == chamadoId);
-      if (index != -1) {
-        _chamados[index] = _chamados[index].copyWith(status: novoStatus);
-        notifyListeners();
-      }
+      // Recarregar o chamado atualizado do servidor
+      await fetchChamadoById(chamadoId);
       
       return true;
     } catch (e) {
