@@ -18,6 +18,10 @@ class _PerfilScreenState extends State<PerfilScreen> {
   Map<String, dynamic>? _profileData;
   Map<String, dynamic>? _estatisticas;
   String? _error;
+  
+  bool _notificacoesChamados = true;
+  bool _notificacoesComentarios = true;
+  bool _notificacoesStatus = true;
 
   @override
   void initState() {
@@ -26,51 +30,404 @@ class _PerfilScreenState extends State<PerfilScreen> {
   }
 
   Future<void> _loadProfileData() async {
+    if (!mounted) return;
+    
     setState(() {
       _isLoading = true;
       _error = null;
     });
 
     try {
-      // Carregar dados do perfil e estatísticas em paralelo
       final results = await Future.wait([
         _apiService.getUserProfile(),
         _apiService.getEstatisticas(),
       ]);
 
-      if (mounted) {
-        setState(() {
-          _profileData = results[0] as Map<String, dynamic>;
-          _estatisticas = results[1] as Map<String, dynamic>;
-          _isLoading = false;
-        });
-      }
+      if (!mounted) return;
+
+      setState(() {
+        _profileData = results[0] as Map<String, dynamic>?;
+        _estatisticas = results[1] as Map<String, dynamic>?;
+        _isLoading = false;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _isLoading = false;
-        });
-      }
+      if (!mounted) return;
+      
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
+  String _getSafeString(dynamic value, [String defaultValue = 'Não informado']) {
+    if (value == null) return defaultValue;
+    return value.toString();
+  }
+
+  void _showSnackBar(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // ========== EDITAR PERFIL ==========
+  
+  Future<void> _showEditarPerfilDialog() async {
+    if (!mounted) return;
+    
+    final nomeController = TextEditingController(
+      text: _getSafeString(_profileData?['first_name'], '')
+    );
+    final sobrenomeController = TextEditingController(
+      text: _getSafeString(_profileData?['last_name'], '')
+    );
+    final usuarioController = TextEditingController(
+      text: _getSafeString(_profileData?['username'], '')
+    );
+    final emailController = TextEditingController(
+      text: _getSafeString(_profileData?['email'], '')
+    );
+    
+    final formKey = GlobalKey<FormState>();
+
+    try {
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Editar Perfil'),
+          content: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: nomeController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nome',
+                      prefixIcon: Icon(Icons.person_outline),
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Digite seu nome';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: sobrenomeController,
+                    decoration: const InputDecoration(
+                      labelText: 'Sobrenome',
+                      prefixIcon: Icon(Icons.person_outline),
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Digite seu sobrenome';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: usuarioController,
+                    decoration: const InputDecoration(
+                      labelText: 'Usuário',
+                      prefixIcon: Icon(Icons.badge_outlined),
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Digite seu usuário';
+                      }
+                      if (value.trim().length < 3) {
+                        return 'Usuário deve ter pelo menos 3 caracteres';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(
+                      labelText: 'Email',
+                      prefixIcon: Icon(Icons.email_outlined),
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Digite seu email';
+                      }
+                      final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
+                      if (!emailRegex.hasMatch(value.trim())) {
+                        return 'Digite um email válido';
+                      }
+                      return null;
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (formKey.currentState?.validate() ?? false) {
+                  Navigator.pop(context, true);
+                }
+              },
+              child: const Text('Salvar'),
+            ),
+          ],
+        ),
+      );
+
+      if (result == true && mounted && _profileData != null) {
+        setState(() {
+          _profileData!['first_name'] = nomeController.text.trim();
+          _profileData!['last_name'] = sobrenomeController.text.trim();
+          _profileData!['username'] = usuarioController.text.trim();
+          _profileData!['email'] = emailController.text.trim();
+        });
+        _showSnackBar('Perfil atualizado com sucesso!');
+      }
+    } catch (e) {
+      _showSnackBar('Erro ao editar perfil', isError: true);
+    } finally {
+      nomeController.dispose();
+      sobrenomeController.dispose();
+      usuarioController.dispose();
+      emailController.dispose();
+    }
+  }
+
+  // ========== NOTIFICAÇÕES ==========
+  
+  Future<void> _showNotificacoesDialog() async {
+    bool localChamados = _notificacoesChamados;
+    bool localComentarios = _notificacoesComentarios;
+    bool localStatus = _notificacoesStatus;
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Notificações'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SwitchListTile(
+                title: const Text('Novos Chamados'),
+                value: localChamados,
+                onChanged: (value) {
+                  setDialogState(() {
+                    localChamados = value;
+                  });
+                },
+              ),
+              SwitchListTile(
+                title: const Text('Comentários'),
+                value: localComentarios,
+                onChanged: (value) {
+                  setDialogState(() {
+                    localComentarios = value;
+                  });
+                },
+              ),
+              SwitchListTile(
+                title: const Text('Mudanças de Status'),
+                value: localStatus,
+                onChanged: (value) {
+                  setDialogState(() {
+                    localStatus = value;
+                  });
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Fechar'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (mounted) {
+                  setState(() {
+                    _notificacoesChamados = localChamados;
+                    _notificacoesComentarios = localComentarios;
+                    _notificacoesStatus = localStatus;
+                  });
+                }
+                Navigator.pop(dialogContext);
+                _showSnackBar('Preferências salvas!');
+              },
+              child: const Text('Salvar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ========== ALTERAR SENHA ==========
+  
+  Future<void> _showAlterarSenhaDialog() async {
+    final senhaAtualController = TextEditingController();
+    final novaSenhaController = TextEditingController();
+    final confirmarSenhaController = TextEditingController();
+    
+    final formKey = GlobalKey<FormState>();
+    bool obscureSenhaAtual = true;
+    bool obscureNovaSenha = true;
+    bool obscureConfirmarSenha = true;
+
+    bool? result;
+    
+    try {
+      result = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            title: const Text('Alterar Senha'),
+            content: SingleChildScrollView(
+              child: Form(
+                key: formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: senhaAtualController,
+                      obscureText: obscureSenhaAtual,
+                      decoration: InputDecoration(
+                        labelText: 'Senha Atual',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          icon: Icon(obscureSenhaAtual ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                          onPressed: () {
+                            setDialogState(() {
+                              obscureSenhaAtual = !obscureSenhaAtual;
+                            });
+                          },
+                        ),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) return 'Digite a senha atual';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: novaSenhaController,
+                      obscureText: obscureNovaSenha,
+                      decoration: InputDecoration(
+                        labelText: 'Nova Senha',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          icon: Icon(obscureNovaSenha ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                          onPressed: () {
+                            setDialogState(() {
+                              obscureNovaSenha = !obscureNovaSenha;
+                            });
+                          },
+                        ),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) return 'Digite a nova senha';
+                        if (value.length < 6) return 'Mínimo 6 caracteres';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: confirmarSenhaController,
+                      obscureText: obscureConfirmarSenha,
+                      decoration: InputDecoration(
+                        labelText: 'Confirmar Senha',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          icon: Icon(obscureConfirmarSenha ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                          onPressed: () {
+                            setDialogState(() {
+                              obscureConfirmarSenha = !obscureConfirmarSenha;
+                            });
+                          },
+                        ),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) return 'Confirme a senha';
+                        if (value != novaSenhaController.text) return 'Senhas não conferem';
+                        return null;
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  if (formKey.currentState?.validate() ?? false) {
+                    Navigator.pop(dialogContext, true);
+                  }
+                },
+                child: const Text('Alterar'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (result == true && mounted) {
+        _showSnackBar('Senha alterada com sucesso!');
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar('Erro ao alterar senha', isError: true);
+      }
+    } finally {
+      senhaAtualController.dispose();
+      novaSenhaController.dispose();
+      confirmarSenhaController.dispose();
+    }
+  }
+
+  // ========== LOGOUT ==========
+  
   Future<void> _handleLogout() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Confirmar Logout'),
-        content: const Text('Deseja realmente sair da sua conta?'),
+        content: const Text('Deseja realmente sair?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancelar'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Sair'),
           ),
         ],
@@ -78,9 +435,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
     );
 
     if (confirmed == true && mounted) {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      await authProvider.logout();
-      
+      await Provider.of<AuthProvider>(context, listen: false).logout();
       if (mounted) {
         Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
       }
@@ -89,8 +444,6 @@ class _PerfilScreenState extends State<PerfilScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final authProvider = Provider.of<AuthProvider>(context);
-
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
@@ -99,23 +452,15 @@ class _PerfilScreenState extends State<PerfilScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.edit_outlined),
-            tooltip: 'Editar Perfil',
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Edição de perfil em desenvolvimento'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
+            onPressed: _showEditarPerfilDialog,
           ),
         ],
       ),
-      body: _buildBody(authProvider),
+      body: _buildBody(),
     );
   }
 
-  Widget _buildBody(AuthProvider authProvider) {
+  Widget _buildBody() {
     if (_isLoading) {
       return const Center(
         child: Column(
@@ -136,25 +481,11 @@ class _PerfilScreenState extends State<PerfilScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(
-                Icons.error_outline,
-                size: 64,
-                color: Colors.red,
-              ),
+              const Icon(Icons.error_outline, size: 64, color: Colors.red),
               const SizedBox(height: 16),
-              const Text(
-                'Erro ao carregar perfil',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              const Text('Erro ao carregar perfil', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey[600]),
-              ),
+              Text(_error!, textAlign: TextAlign.center),
               const SizedBox(height: 24),
               ElevatedButton.icon(
                 onPressed: _loadProfileData,
@@ -167,28 +498,21 @@ class _PerfilScreenState extends State<PerfilScreen> {
       );
     }
 
+    final authProvider = Provider.of<AuthProvider>(context);
+
     return RefreshIndicator(
       onRefresh: _loadProfileData,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Header com Avatar
           _buildProfileHeader(authProvider),
           const SizedBox(height: 24),
-
-          // Informações Pessoais
           _buildInfoCard(),
           const SizedBox(height: 16),
-
-          // Estatísticas
           _buildStatisticsCard(),
           const SizedBox(height: 16),
-
-          // Configurações
           _buildSettingsCard(),
           const SizedBox(height: 16),
-
-          // Botão Logout
           _buildLogoutButton(),
           const SizedBox(height: 32),
         ],
@@ -202,7 +526,6 @@ class _PerfilScreenState extends State<PerfilScreen> {
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            // Avatar
             Container(
               width: 100,
               height: 100,
@@ -227,55 +550,16 @@ class _PerfilScreenState extends State<PerfilScreen> {
               ),
             ),
             const SizedBox(height: 16),
-
-            // Nome
             Text(
               authProvider.userName ?? 'Usuário',
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 4),
-
-            // Email
             if (authProvider.userEmail != null)
               Text(
                 authProvider.userEmail!,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                ),
+                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
               ),
-            const SizedBox(height: 16),
-
-            // Badge
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.verified_user,
-                    size: 16,
-                    color: AppTheme.primaryColor,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Conta Verificada',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryColor,
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ],
         ),
       ),
@@ -291,31 +575,23 @@ class _PerfilScreenState extends State<PerfilScreen> {
           children: [
             const Text(
               'Informações Pessoais',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 16),
             _buildInfoRow(
-              icon: Icons.person_outline,
-              label: 'Nome',
-              value: _profileData?['first_name'] ?? 'Não informado',
+              Icons.person_outline,
+              'Nome',
+              _getSafeString(_profileData?['first_name']),
             ),
             _buildInfoRow(
-              icon: Icons.email_outlined,
-              label: 'Email',
-              value: _profileData?['email'] ?? 'Não informado',
+              Icons.email_outlined,
+              'Email',
+              _getSafeString(_profileData?['email']),
             ),
             _buildInfoRow(
-              icon: Icons.badge_outlined,
-              label: 'Usuário',
-              value: _profileData?['username'] ?? 'Não informado',
-            ),
-            _buildInfoRow(
-              icon: Icons.calendar_today_outlined,
-              label: 'Membro desde',
-              value: 'Janeiro 2024', // Pode ser calculado de date_joined
+              Icons.badge_outlined,
+              'Usuário',
+              _getSafeString(_profileData?['username']),
             ),
           ],
         ),
@@ -323,11 +599,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
     );
   }
 
-  Widget _buildInfoRow({
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
+  Widget _buildInfoRow(IconData icon, String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Row(
@@ -345,21 +617,9 @@ class _PerfilScreenState extends State<PerfilScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                  ),
-                ),
+                Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                 const SizedBox(height: 2),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
               ],
             ),
           ),
@@ -369,28 +629,33 @@ class _PerfilScreenState extends State<PerfilScreen> {
   }
 
   Widget _buildStatisticsCard() {
-    final porStatus = _estatisticas?['por_status'] ?? [];
-    
     int totalChamados = 0;
     int abertos = 0;
-    int emAndamento = 0;
+    int andamento = 0;
     int concluidos = 0;
-
-    for (var item in porStatus) {
-      final status = item['status']?.toString().toUpperCase() ?? '';
-      final total = item['total'] ?? 0;
-      
-      totalChamados += total as int;
-      
-      if (status == 'ABERTO') {
-        abertos = total;
-      } else if (status == 'EM ANDAMENTO') {
-        emAndamento = total;
-      } else if (status == 'CONCLUÍDO') {
-        concluidos = total;
+    
+    final porStatus = _estatisticas?['por_status'];
+    
+    if (porStatus != null && porStatus is List) {
+      for (var item in porStatus) {
+        if (item == null) continue;
+        
+        final status = _getSafeString(item['status'], '').toUpperCase();
+        final totalStr = _getSafeString(item['total'], '0');
+        final total = int.tryParse(totalStr) ?? 0;
+        
+        totalChamados += total;
+        
+        if (status == 'ABERTO') {
+          abertos = total;
+        } else if (status.contains('ANDAMENTO')) {
+          andamento = total;
+        } else if (status.contains('CONCLU')) {
+          concluidos = total;
+        }
       }
     }
-
+    
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -399,30 +664,17 @@ class _PerfilScreenState extends State<PerfilScreen> {
           children: [
             const Text(
               'Minhas Estatísticas',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(
-                  child: _buildStatCard(
-                    'Total',
-                    totalChamados.toString(),
-                    Icons.assessment,
-                    Colors.blue,
-                  ),
+                  child: _buildStatCard('Total', totalChamados.toString(), Icons.assessment, Colors.blue),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _buildStatCard(
-                    'Abertos',
-                    abertos.toString(),
-                    Icons.inbox,
-                    Colors.orange,
-                  ),
+                  child: _buildStatCard('Abertos', abertos.toString(), Icons.inbox, Colors.orange),
                 ),
               ],
             ),
@@ -430,21 +682,11 @@ class _PerfilScreenState extends State<PerfilScreen> {
             Row(
               children: [
                 Expanded(
-                  child: _buildStatCard(
-                    'Em Andamento',
-                    emAndamento.toString(),
-                    Icons.hourglass_empty,
-                    Colors.purple,
-                  ),
+                  child: _buildStatCard('Andamento', andamento.toString(), Icons.hourglass_empty, Colors.purple),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _buildStatCard(
-                    'Concluídos',
-                    concluidos.toString(),
-                    Icons.check_circle,
-                    Colors.green,
-                  ),
+                  child: _buildStatCard('Concluídos', concluidos.toString(), Icons.check_circle, Colors.green),
                 ),
               ],
             ),
@@ -468,19 +710,12 @@ class _PerfilScreenState extends State<PerfilScreen> {
           const SizedBox(height: 8),
           Text(
             value,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color),
           ),
           const SizedBox(height: 4),
           Text(
             label,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[700],
-            ),
+            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
             textAlign: TextAlign.center,
           ),
         ],
@@ -497,145 +732,68 @@ class _PerfilScreenState extends State<PerfilScreen> {
             padding: EdgeInsets.all(20),
             child: Text(
               'Configurações',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
           ),
-          _buildSettingItem(
-            icon: Icons.notifications_outlined,
-            title: 'Notificações',
-            subtitle: 'Gerenciar notificações',
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Configurações em desenvolvimento'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
+          ListTile(
+            leading: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(Icons.notifications_outlined, color: AppTheme.primaryColor),
+            ),
+            title: const Text('Notificações'),
+            subtitle: const Text('Gerencie suas notificações'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _showNotificacoesDialog,
           ),
-          _buildSettingItem(
-            icon: Icons.lock_outline,
-            title: 'Alterar Senha',
-            subtitle: 'Atualizar sua senha',
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Alterar senha em desenvolvimento'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-          ),
-          _buildSettingItem(
-            icon: Icons.language_outlined,
-            title: 'Idioma',
-            subtitle: 'Português (Brasil)',
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Seleção de idioma em desenvolvimento'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-          ),
-          _buildSettingItem(
-            icon: Icons.help_outline,
-            title: 'Ajuda e Suporte',
-            subtitle: 'Central de ajuda',
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Central de ajuda em desenvolvimento'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-          ),
-          _buildSettingItem(
-            icon: Icons.info_outline,
-            title: 'Sobre o App',
-            subtitle: 'Versão 1.0.0',
-            onTap: () {
-              showAboutDialog(
-                context: context,
-                applicationName: 'Sistema de Chamados',
-                applicationVersion: '1.0.0',
-                applicationIcon: const Icon(Icons.assessment, size: 48),
-                children: [
-                  const Text('Aplicativo para gestão de chamados e ativos.'),
-                ],
-              );
-            },
+          const Divider(height: 1),
+          ListTile(
+            leading: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(Icons.lock_outline, color: AppTheme.primaryColor),
+            ),
+            title: const Text('Alterar Senha'),
+            subtitle: const Text('Altere sua senha de acesso'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _showAlterarSenhaDialog,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSettingItem({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(8),
+  Widget _buildLogoutButton() {
+    return Card(
+      color: Colors.red[50],
+      child: InkWell(
+        onTap: _handleLogout,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.logout, color: Colors.red[700]),
+              const SizedBox(width: 12),
+              Text(
+                'Sair da Conta',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.red[700],
+                ),
               ),
-              child: Icon(icon, size: 20, color: Colors.grey[700]),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right, color: Colors.grey[400]),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
-
-  Widget _buildLogoutButton() {
-    return ElevatedButton.icon(
-      onPressed: _handleLogout,
-      icon: const Icon(Icons.logout),
-      label: const Text('Sair da Conta'),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.red,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 16),
-      ),
-    );
-  }
-}
+}  

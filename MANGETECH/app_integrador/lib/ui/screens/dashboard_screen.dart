@@ -1,4 +1,4 @@
-import 'package:app_integrador/ui/screens/editar_chamado_screen.dart';
+import 'package:app_integrador/ui/screens/chamado_detalhe_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../data/providers/chamado_provider.dart';
